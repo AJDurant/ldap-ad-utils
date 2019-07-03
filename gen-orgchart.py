@@ -1,5 +1,7 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 #
+# Copyright (c) 2019 Andy Durant <andy@ajdurant.co.uk>
 # Copyright (c) 2016 Edwin Fine <emofine@usa.net>
 # Copyright (c) 2016 Travis Cross <tc@traviscross.com>
 #
@@ -60,11 +62,14 @@ Options:
   -W, --askpass                  Prompt for simple authentication.
                                  This is used instead of specifying the
                                  password on the command line.
+  -S, --starttls                 Use STARTTLS.
+  -C CAFILE, --cafile=CAFILE     File location of CA certificate to use
+                                 for verification.
   -w, --password=BINDPASSWORD    LDAP simple bind password
 """
 
 import contextlib
-import ldif
+import ldif3
 import re
 import sys
 
@@ -92,12 +97,7 @@ except ImportError:
          ' is installed: \n    pip install python-ldap\n'
          'http://pypi.python.org/pypi/python-ldap/')
 
-reload(sys)
-sys.setdefaultencoding("utf-8")
-
 # To canonicalize LDAP attributes.
-
-#   From                          To
 MAP_ATTRS = {
     "department": "departmentNumber",
     "comment": "description",
@@ -108,9 +108,8 @@ MAP_ATTRS = {
 }
 
 # Jinja2 orgchart template string
-
 ORGCHART_TEMPLATE_STR = """
-strict graph orgchart {
+strict digraph orgchart {
   fontsize = 10;
   fontname = "Helvetica";
   node [
@@ -127,7 +126,7 @@ strict graph orgchart {
   }
   {% endfor %}
   {%- for mgr_dn in reports_to.keys() %}
-  "{{ mgr_dn | name_and_title(display_name, title_of) }}" -- {
+  "{{ mgr_dn | name_and_title(display_name, title_of) }}" -> {
     {%- for dn in reports_to[mgr_dn] %}
     "{{ dn | name_and_title(display_name, title_of) }}"
     {%- endfor %}
@@ -152,7 +151,7 @@ def canonicalize_attrs(entry, attr_map):
 
 def stderr(*args):
     """Log to stderr"""
-    print >>sys.stderr, args
+    print(args, file=sys.stderr)
 
 
 def filters_to_ldapfilter(filters):
@@ -184,24 +183,24 @@ def filters_to_ldapfilter(filters):
     filt_strs = []
     ldap_filter = ''
 
-    for attr, (prefix_op, compare_op, val) in filters.iteritems():
+    for attr, (prefix_op, compare_op, val) in filters.items():
         if prefix_op:
-            filt_str = "({}({}{}{}))".format(prefix_op, attr, compare_op, val)
+            filt_str = f"({prefix_op}({attr}{compare_op}{val}))"
         else:
-            filt_str = "({}{}{})".format(attr, compare_op, val)
+            filt_str = f"({attr}{compare_op}{val})"
         filt_strs.append(filt_str)
 
     if len(filt_strs) > 1:
-        ldap_filter = '(&{})'.format(''.join(filt_strs))
+        ldap_filter = f"(&{''.join(filt_strs)})"
     else:
         if len(filt_strs) == 1:
-            ldap_filter = '({})'.format(filt_strs[0])
+            ldap_filter = f"({filt_strs[0]})"
 
     return ldap_filter
 
 
 def save_result(output, result):
-    ldif_writer = ldif.LDIFWriter(output)
+    ldif_writer = ldif3.LDIFWriter(output)
     for dn, entry in result:
         if dn is not None:
             ldif_writer.unparse(dn, entry)
@@ -258,7 +257,7 @@ def attr_s(entry, attr_name):
     """Get the first attribute named by `attr_name` out of `entry`.
     Return the attribute, or an empty string if not found."""
     if attr_name in entry and len(entry[attr_name]) != 0:
-        return entry[attr_name][0]
+        return entry[attr_name][0].decode("utf-8")
     return ""
 
 
@@ -293,14 +292,13 @@ def gen_orgchart(fh, org, jinja2_template_str):
         return re.sub(r"\W+", "_", s).strip("_").lower()
 
     def name_and_title(dn, display_name, title_of):
-        return '{}\\n{}'.format(name_s(dn, display_name),
-                                title_s(dn, title_of))
+        return f"{name_s(dn, display_name)}\n{title_s(dn, title_of)}"
 
     env = Environment()
     env.filters['snake_case'] = snake_case
     env.filters['name_and_title'] = name_and_title
 
-    env.from_string(jinja2_template_str).stream(org).dump(fh)
+    env.from_string(jinja2_template_str).stream(org).dump(fh, encoding='utf-8')
 
 
 def set_options(ldap_conn, ldap_opts):
@@ -315,7 +313,7 @@ def smart_open(filename=None):
     Close the file on exit from the scope.
     """
     if filename and filename != '-':
-        fh = open(filename, 'w')
+        fh = open(filename, 'wb')
     else:
         fh = sys.stdout
 
@@ -348,7 +346,7 @@ def get_attrlist_filterstr(schema_name, filters):
     else:
         raise ValueError('Unsupported schema "{}"'.format(schema_name))
 
-    return (attrstr.split(), filters_to_ldapfilter(filters))
+    return attrstr.split(), filters_to_ldapfilter(filters)
 
 
 def ldap_errmsg(ldap_error):
@@ -381,11 +379,13 @@ def main(**kwargs):
     binddn = kwargs["--binddn"]
     password = kwargs["--password"]
     askpass = kwargs["--askpass"]
+    starttls = kwargs["--starttls"]
+    cafile = kwargs["--cafile"]
     trace_level = int(kwargs["--trace-level"])
     timeout = int(kwargs["--timeout"])
 
     if debug:
-        print 'askpass: {}'.format(askpass)
+        print(f"askpass: {askpass}")
 
     if askpass:
         password = getpass("Bind password: ")
@@ -394,6 +394,10 @@ def main(**kwargs):
         ldap.OPT_PROTOCOL_VERSION: 3,
         ldap.OPT_REFERRALS: 0,  # No, don't chase referrals
     }
+
+    if cafile:
+        # CA File requires setting globally
+        ldap.set_option(ldap.OPT_X_TLS_CACERTFILE, cafile)
 
     if timeout >= 0:
         ldap_opts[ldap.OPT_NETWORK_TIMEOUT] = timeout
@@ -407,6 +411,9 @@ def main(**kwargs):
 
     ldap_conn = ldap.initialize(ldapuri, trace_level=trace_level)
     set_options(ldap_conn, ldap_opts)
+
+    if starttls:
+        ldap_conn.start_tls_s()
 
     if binddn is not None and password is not None:
         try:
@@ -440,6 +447,3 @@ if __name__ == "__main__":
         stderr(arguments, "\n")
 
     main(**arguments)
-
-# vim: tw=68 ft=python syntax=python ts=4 sts=4 sw=4 et :
-
