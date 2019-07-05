@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
+# coding: utf8
 #
 # Copyright (c) 2019 Andy Durant <andy@ajdurant.co.uk>
 # Copyright (c) 2016 Edwin Fine <emofine@usa.net>
@@ -298,7 +298,7 @@ def gen_orgchart(fh, org, jinja2_template_str):
     env.filters['snake_case'] = snake_case
     env.filters['name_and_title'] = name_and_title
 
-    env.from_string(jinja2_template_str).stream(org).dump(fh, encoding='utf-8')
+    env.from_string(jinja2_template_str).stream(org).dump(fh)
 
 
 def set_options(ldap_conn, ldap_opts):
@@ -313,7 +313,7 @@ def smart_open(filename=None):
     Close the file on exit from the scope.
     """
     if filename and filename != '-':
-        fh = open(filename, 'wb')
+        fh = open(filename, 'w', encoding='utf-8')
     else:
         fh = sys.stdout
 
