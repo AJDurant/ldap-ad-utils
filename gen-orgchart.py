@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # coding: utf8
 #
 # Copyright (c) 2019 Andy Durant <andy@ajdurant.co.uk>
@@ -59,13 +59,15 @@ Options:
                                  results; range is 0 to 9 [default: 0].
   -V, --version                  Show version.
   -v, --verbose                  Print extra information [default: False].
-  -W, --askpass                  Prompt for simple authentication.
-                                 This is used instead of specifying the
-                                 password on the command line.
   -S, --starttls                 Use STARTTLS.
   -C CAFILE, --cafile=CAFILE     File location of CA certificate to use
                                  for verification.
+  -W, --askpass                  Prompt for simple authentication.
+                                 This is used instead of specifying the
+                                 password on the command line.
   -w, --password=BINDPASSWORD    LDAP simple bind password
+  -p PFILE, --passfile=PFILE     File location of password to use
+                                 for bind.
 """
 
 import contextlib
@@ -381,6 +383,7 @@ def main(**kwargs):
     askpass = kwargs["--askpass"]
     starttls = kwargs["--starttls"]
     cafile = kwargs["--cafile"]
+    passfile = kwargs["--passfile"]
     trace_level = int(kwargs["--trace-level"])
     timeout = int(kwargs["--timeout"])
 
@@ -389,6 +392,10 @@ def main(**kwargs):
 
     if askpass:
         password = getpass("Bind password: ")
+
+    if passfile:
+        with open(passfile) as f:
+            password = f.readline().strip()
 
     ldap_opts = {
         ldap.OPT_PROTOCOL_VERSION: 3,
